@@ -1,0 +1,2 @@
+testnet: rinkeby
+contract address: 0x1E7B62A6814751d5B1F39145eD9eE5841633c1eC
