@@ -1,63 +1,83 @@
 import React from 'react';
+import { connect } from 'react-redux';
 import ipfs from '../ipfs/ipfs';
 import keys from '../utils/keys';
 import NodeRSA from 'node-rsa';
 
-import EthereumContext from '../contexts/EthereumContext';
+import { loadImage, setSebid, setTableBody } from '../actions';
 
 class ListEntries extends React.Component {
-  static contextType = EthereumContext;
 
-  async componentDidMount() {
+  constructor() {
+    super()
+
+    this.state = {
+      fetchedEntries: false,
+    }
+  }
+
+  componentDidMount() {
   	try {
-	  	var result = await this.context.contract.methods.getSenderEntries().call({from: this.context.accounts[0]});
-
-	  	if (result.length > 0) {
-	  		let t = this;
-	  	
-	  		var tempEntry = {};
-
-	  		result.forEach(entry => {
-	  			tempEntry['id'] = entry['id'];
-	  			tempEntry['title'] = entry['title'];
-	  			tempEntry['ipfs hash'] = entry['ipfs'];
-	  			tempEntry['released'] = entry['isReleased'].toString();
-	  			tempEntry['unlockTime'] = entry['unlockTime'];
-
-	  			if (entry['isReleased'].toString() === 'true') {
-	  				tempEntry['ec_aes_key'] = entry['ec_aes_key'];
-	  				tempEntry['priv_key'] = entry['priv_key'];
-	  			}
-
-	  			if (!t.context.strippedEntriesByID[tempEntry['id']]) {
-		  			t.context.updateStrippedEntriesByID(tempEntry);
-	  			}
-
-	  			tempEntry = {};
-	  		});
-
-	  		this.context.setTableBody(this.buildTableBody());
-	  	}
+      this.interval = setInterval(this.fetchEntries, 1000);
   	} catch (error) {
   		console.log(error);
   	}
   }
 
+  fetchEntries = async() => {
+    if (this.state.fetchedEntries === true) {
+      clearInterval(this.interval);
+    }
+
+    if (this.props && this.props.contract && this.props.contract.contract) {
+      var result = await this.props.contract.contract.methods.getSenderEntries().call({from: this.props.accounts.accounts[0]});
+
+      if (result.length > 0) {
+        let t = this;
+      
+        var tempEntry = {};
+
+        result.forEach(entry => {
+          tempEntry['id'] = entry['id'];
+          tempEntry['title'] = entry['title'];
+          tempEntry['ipfs hash'] = entry['ipfs'];
+          tempEntry['released'] = entry['isReleased'].toString();
+          tempEntry['unlockTime'] = entry['unlockTime'];
+
+          if (entry['isReleased'].toString() === 'true') {
+            tempEntry['ec_aes_key'] = entry['ec_aes_key'];
+            tempEntry['priv_key'] = entry['priv_key'];
+          }
+
+          if (!t.props.sebid.sebid || !t.props.sebid.sebid[tempEntry['id']]) {
+            t.updateStrippedEntriesByID(tempEntry);
+          }
+
+          tempEntry = {};
+        });
+
+        this.props.setTableBody(this.buildTableBody());
+      }
+      
+      this.state.fetchedEntries = true;
+    }
+  }
+
   listenToReleaseEntryEvent() {
     let t = this;
 
-    this.context.contract.events.EventRelease({fromBlock: 0, toBlock: 'latest'})
+    this.props.contract.contract.events.EventRelease({fromBlock: 0, toBlock: 'latest'})
       .on('data', function(event) {
         console.log(`EventRelease received: ${event} || ${event.returnValues}`);
         console.log(event.returnValues);
 
-        let tse = t.context.strippedEntriesByID[event.returnValues['id']];
+        let tse = t.props.sebid.sebid[event.returnValues['id']];
         if (tse) {
         	tse['released'] = 'true';
         	tse['priv_key'] = event.returnValues['priv_key'];
           tse['ec_aes_key'] = event.returnValues['ec_aes_key'];
-	        t.context.updateStrippedEntriesByID(tse);
-	        t.context.setTableBody(t.buildTableBody());
+	        t.updateStrippedEntriesByID(tse);
+	        t.props.setTableBody(t.buildTableBody());
         }
       })
       .on('error', console.error);
@@ -65,12 +85,14 @@ class ListEntries extends React.Component {
 
   releaseEntry = (e) => {
   	console.log(parseInt(e.currentTarget.getAttribute('value')));
-    this.context.contract.methods.release(parseInt(e.currentTarget.getAttribute('value'))).send({from: this.context.accounts[0]});
+    this.props.contract.contract.methods.release(parseInt(e.currentTarget.getAttribute('value'))).send({from: this.props.accounts.accounts[0]});
     this.listenToReleaseEntryEvent();
   }
 
   decryptIPFS = (e) => {
-  	var entry = this.context.strippedEntriesByID[parseInt(e.currentTarget.getAttribute('value'))];
+  	var entry = this.props.sebid.sebid[parseInt(e.currentTarget.getAttribute('value'))];
+
+    let t = this;
 
 	  ipfs.cat(entry['ipfs hash'], (err, r) => {
 	  	let z = new NodeRSA(entry['priv_key']);
@@ -80,13 +102,13 @@ class ListEntries extends React.Component {
 	    var decryptedArrayBuffer = keys.convertWordArrayToArrayBuffer(decryptedWordArray);
 
 	    var imageUrl = keys.convertArrayBufferToImage(decryptedArrayBuffer);
-	    this.context.setImage(imageUrl);
+	    t.props.loadImage(imageUrl);
 	  });
   }
 
   buildTableBody() {
   	let tableBody = [];
-  	let sebid = this.context.strippedEntriesByID;
+  	let sebid = this.props.sebid.sebid;
 
   	if (Object.keys(sebid).length > 0) {
   		for (var key in sebid) {
@@ -123,6 +145,28 @@ class ListEntries extends React.Component {
   	return tableBody;
   }
 
+  displayImage() {
+    if (this.props.image && this.props.image.image) {
+      return this.props.image.image
+    } else {
+      return null;
+    }
+  }
+
+  displayTableBody() {
+    if (this.props.tableBody && this.props.tableBody.tableBody) {
+      return this.props.tableBody.tableBody
+    } else {
+      return null;
+    }
+  }
+
+  updateStrippedEntriesByID(newStrippedEntry) {
+    var updatedSebid = {...this.props.sebid.sebid}
+    updatedSebid[newStrippedEntry['id']] = newStrippedEntry;
+    this.props.setSebid(updatedSebid);
+  }
+
   render() {
   	return (
   		<div>
@@ -136,14 +180,21 @@ class ListEntries extends React.Component {
 						</tr>
   				</thead>
   				<tbody key="tbody">
-						{this.context.tableBody}
+						{this.displayTableBody()}
   				</tbody>
   			</table>
 
-  			<img src={this.context.image} />
+  			<img src={this.displayImage()} />
       </div>
   	)
   }
 }
 
-export default ListEntries;
+const mapStateToProps = (state) => {
+  return { contract: state.contract, accounts: state.accounts, image: state.image, sebid: state.sebid, tableBody: state.tableBody };
+};
+
+export default connect(
+  mapStateToProps,
+  { loadImage, setSebid, setTableBody }
+)(ListEntries);

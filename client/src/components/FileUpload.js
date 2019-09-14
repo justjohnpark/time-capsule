@@ -1,23 +1,26 @@
 import React from 'react';
+import { connect } from 'react-redux';
 import NodeRSA from 'node-rsa';
 // import CryptoJS from 'crypto-js';
 
 import { Buffer } from 'buffer';
-import EthereumContext from '../contexts/EthereumContext';
 import ipfs from '../ipfs/ipfs';
 import keys from '../utils/keys';
 
-class FileUpload extends React.Component {
-  static contextType = EthereumContext;
+import { loadImage, setSebid, setTableBody } from '../actions';
 
+class FileUpload extends React.Component {
+  
   constructor(props) {
-    super(props);
+    super();
+
     this.state = {
       file: null,
       image: null,
       title: '',
       unlockTime: 0
     }
+
     this.onFormSubmit = this.onFormSubmit.bind(this);
     this.onChange = this.onChange.bind(this);
     this.fileUpload = this.fileUpload.bind(this);
@@ -51,6 +54,8 @@ class FileUpload extends React.Component {
     var aesEncrypted = keys.encryptWordArray(wordArray, key);
     var encryptedBuffer = new Buffer(aesEncrypted);
 
+    let t = this;
+
     ipfs.add(encryptedBuffer, (err, result) => {
       // generate RSA public/private key pair 
       let keyPair = keys.generatePubPrivKeyPair();
@@ -60,8 +65,8 @@ class FileUpload extends React.Component {
       let ecAesKey = nrsa.encrypt(key, 'base64');
 
       if (!err) {
-        this.context.contract.methods.appendEntry(this.state.unlockTime, result[0].path, this.state.title, ecAesKey, keyPair[1]).send({from: this.context.accounts[0]});
-        this.listenToAppendEntryEvent();
+        t.props.contract.contract.methods.appendEntry(t.state.unlockTime, result[0].path, t.state.title, ecAesKey, keyPair[1]).send({from: t.props.accounts.accounts[0]});
+        t.listenToAppendEntryEvent();
       }
     });
   }
@@ -76,21 +81,15 @@ class FileUpload extends React.Component {
     this.setState({ unlockTime: toUTC });
   };
 
-  releaseEntry(id) {
-    console.log(`id: ${id}`);
-    this.context.contract.methods.release(parseInt(id)).send({from: this.context.accounts[0]});
-    this.listenToReleaseEntryEvent();
-  }
-
   listenToAppendEntryEvent() {
     let t = this;
 
-    this.context.contract.events.EventEntry({fromBlock: 0, toBlock: 'latest'})
+    this.props.contract.contract.events.EventEntry({fromBlock: 0, toBlock: 'latest'})
       .on('data', function(event) {
         console.log(`EventEntry received: ${event} || ${event.returnValues}`);
         console.log(event.returnValues);
 
-        if (!t.context.strippedEntriesByID[event.returnValues['id']]) {
+        if (!t.props.sebid.sebid || !t.props.sebid.sebid[event.returnValues['id']]) {
           var newEntry = {
             'id' : event.returnValues['id'],
             'title' : event.returnValues['title'],
@@ -99,10 +98,8 @@ class FileUpload extends React.Component {
             'unlockTime' : event.returnValues['unlockTime']
           }
 
-          console.log(t.buildTableBody());
-
-          t.context.updateStrippedEntriesByID(newEntry);
-          t.context.setTableBody(t.buildTableBody());
+          t.updateStrippedEntriesByID(newEntry);
+          t.props.setTableBody(t.buildTableBody());
         }
       })
       .on('error', console.error);
@@ -111,18 +108,18 @@ class FileUpload extends React.Component {
   listenToReleaseEntryEvent() {
     let t = this;
 
-    this.context.contract.events.EventRelease({fromBlock: 0, toBlock: 'latest'})
+    this.props.contract.contract.events.EventRelease({fromBlock: 0, toBlock: 'latest'})
       .on('data', function(event) {
         console.log(`EventRelease received: ${event} || ${event.returnValues}`);
         console.log(event.returnValues);
 
-        let tse = t.context.strippedEntriesByID[event.returnValues['id']];
+        let tse = t.props.sebid.sebid[event.returnValues['id']];
         if (tse) {
           tse['released'] = 'true';
           tse['priv_key'] = event.returnValues['priv_key'];
           tse['ec_aes_key'] = event.returnValues['ec_aes_key'];
-          t.context.updateStrippedEntriesByID(tse);
-          t.context.setTableBody(t.buildTableBody());
+          t.updateStrippedEntriesByID(tse);
+          t.props.setTableBody(t.buildTableBody());
         }
       })
       .on('error', console.error);
@@ -130,12 +127,14 @@ class FileUpload extends React.Component {
 
   releaseEntry = (e) => {
     console.log(parseInt(e.currentTarget.getAttribute('value')));
-    this.context.contract.methods.release(parseInt(e.currentTarget.getAttribute('value'))).send({from: this.context.accounts[0]});
+    this.props.contract.contract.methods.release(parseInt(e.currentTarget.getAttribute('value'))).send({from: this.props.accounts.accounts[0]});
     this.listenToReleaseEntryEvent();
   }
 
   decryptIPFS = (e) => {
-    var entry = this.context.strippedEntriesByID[parseInt(e.currentTarget.getAttribute('value'))];
+    var entry = this.props.sebid.sebid[parseInt(e.currentTarget.getAttribute('value'))];
+
+    let t = this;
 
     ipfs.cat(entry['ipfs hash'], (err, r) => {
       let z = new NodeRSA(entry['priv_key']);
@@ -145,13 +144,13 @@ class FileUpload extends React.Component {
       var decryptedArrayBuffer = keys.convertWordArrayToArrayBuffer(decryptedWordArray);
 
       var imageUrl = keys.convertArrayBufferToImage(decryptedArrayBuffer);
-      this.context.setImage(imageUrl);
+      t.props.loadImage(imageUrl);
     });
   }
 
   buildTableBody() {
     let tableBody = [];
-    let sebid = this.context.strippedEntriesByID;
+    let sebid = this.props.sebid.sebid;
 
     if (Object.keys(sebid).length > 0) {
       for (var key in sebid) {
@@ -188,9 +187,15 @@ class FileUpload extends React.Component {
     return tableBody;
   }
 
+  updateStrippedEntriesByID(newStrippedEntry) {
+    var updatedSebid = {...this.props.sebid.sebid}
+    updatedSebid[newStrippedEntry['id']] = newStrippedEntry;
+    this.props.setSebid(updatedSebid);
+  }
+
   render() {
-    if (this.context.currentAddress != null || this.context.currentAddress != '') {
-      var displayCurrentAddress = <h4>Current Metamask Address: {this.context.currentAddress}</h4>
+    if (this.props.currentAddress != null || this.props.currentAddress != '') {
+      var displayCurrentAddress = <h4>Current Metamask Address: {this.props.currentAddress}</h4>
     } else {
       var displayCurrentAddress = null;
     }
@@ -211,4 +216,11 @@ class FileUpload extends React.Component {
   }
 }
 
-export default FileUpload;
+const mapStateToProps = (state) => {
+  return { currentAddress: state.currentAddress, contract: state.contract, accounts: state.accounts, image: state.image, sebid: state.sebid, tableBody: state.tableBody };
+};
+
+export default connect(
+  mapStateToProps, 
+  { loadImage, setSebid, setTableBody }
+)(FileUpload);
