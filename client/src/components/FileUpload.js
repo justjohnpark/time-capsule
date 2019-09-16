@@ -1,13 +1,13 @@
 import React from 'react';
 import { connect } from 'react-redux';
 import NodeRSA from 'node-rsa';
+import { Buffer } from 'buffer';
 // import CryptoJS from 'crypto-js';
 
-import { Buffer } from 'buffer';
 import ipfs from '../ipfs/ipfs';
 import keys from '../utils/keys';
-
-import { loadImage, setSebid, setTableBody } from '../actions';
+import util from '../utils/index';
+import { setSebid, setTableBody } from '../actions';
 
 class FileUpload extends React.Component {
   
@@ -98,7 +98,7 @@ class FileUpload extends React.Component {
             'unlockTime' : event.returnValues['unlockTime']
           }
 
-          t.updateStrippedEntriesByID(newEntry);
+          util.updateStrippedEntriesByID(newEntry);
           t.props.setTableBody(t.buildTableBody());
         }
       })
@@ -118,7 +118,7 @@ class FileUpload extends React.Component {
           tse['released'] = 'true';
           tse['priv_key'] = event.returnValues['priv_key'];
           tse['ec_aes_key'] = event.returnValues['ec_aes_key'];
-          t.updateStrippedEntriesByID(tse);
+          util.updateStrippedEntriesByID(tse);
           t.props.setTableBody(t.buildTableBody());
         }
       })
@@ -129,23 +129,6 @@ class FileUpload extends React.Component {
     console.log(parseInt(e.currentTarget.getAttribute('value')));
     this.props.contract.contract.methods.release(parseInt(e.currentTarget.getAttribute('value'))).send({from: this.props.accounts.accounts[0]});
     this.listenToReleaseEntryEvent();
-  }
-
-  decryptIPFS = (e) => {
-    var entry = this.props.sebid.sebid[parseInt(e.currentTarget.getAttribute('value'))];
-
-    let t = this;
-
-    ipfs.cat(entry['ipfs hash'], (err, r) => {
-      let z = new NodeRSA(entry['priv_key']);
-      let dcAesKey = z.decrypt(entry['ec_aes_key'], 'utf8');
-
-      var decryptedWordArray = keys.decryptToWordArray(r, dcAesKey);
-      var decryptedArrayBuffer = keys.convertWordArrayToArrayBuffer(decryptedWordArray);
-
-      var imageUrl = keys.convertArrayBufferToImage(decryptedArrayBuffer);
-      t.props.loadImage(imageUrl);
-    });
   }
 
   buildTableBody() {
@@ -159,7 +142,7 @@ class FileUpload extends React.Component {
             <tr key={`${key}`}>
               <td>{sebid[key]['title']}</td>
               <td>
-                <a value={key} href="#" onClick={(e) => this.decryptIPFS(e)}>
+                <a value={key} href="#" onClick={(e) => util.decryptIPFS(e)}>
                   {sebid[key]['ipfs hash']}
                 </a>
               </td>
@@ -187,18 +170,14 @@ class FileUpload extends React.Component {
     return tableBody;
   }
 
-  updateStrippedEntriesByID(newStrippedEntry) {
-    var updatedSebid = {...this.props.sebid.sebid}
-    updatedSebid[newStrippedEntry['id']] = newStrippedEntry;
-    this.props.setSebid(updatedSebid);
-  }
-
   render() {
     if (this.props.currentAddress != null || this.props.currentAddress != '') {
       var displayCurrentAddress = <h4>Current Metamask Address: {this.props.currentAddress}</h4>
     } else {
       var displayCurrentAddress = null;
     }
+
+    // util.testFunction()
 
     return (
       <div className="FileUpload">
@@ -222,5 +201,5 @@ const mapStateToProps = (state) => {
 
 export default connect(
   mapStateToProps, 
-  { loadImage, setSebid, setTableBody }
+  { setSebid, setTableBody }
 )(FileUpload);
